@@ -1,0 +1,84 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: "26.3.11579264"
+  BUILD_TOOLS: "34.0.0"
+  PLATFORM: "android-34"
+  ANDROID_HOME: $HOME/android-sdk
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Java (for keytool/apksigner)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Android SDK command-line tools
+        run: |
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -sSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/clt.zip
+          unzip -q /tmp/clt.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+
+      - name: Install NDK, build-tools, platform
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$ANDROID_HOME" \
+            "ndk;$NDK_VERSION" \
+            "build-tools;$BUILD_TOOLS" \
+            "platforms;$PLATFORM" > /dev/null
+
+      - name: Install cargo-apk2
+        run: cargo install cargo-apk2 --locked
+
+      - name: Generate self-signed release keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/player.keystore" \
+            -alias player \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Player, OU=Player, O=Player, L=Unknown, ST=Unknown, C=US"
+
+      - name: Build APK
+        env:
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+          ANDROID_NDK_HOME: $HOME/android-sdk/ndk/${{ env.NDK_VERSION }}
+          ANDROID_NDK_ROOT: $HOME/android-sdk/ndk/${{ env.NDK_VERSION }}
+        run: cargo apk2 build --release
+
+      - name: Sign APK
+        env:
+          ANDROID_HOME: $HOME/android-sdk
+        run: |
+          APK=$(ls target/release/apk/*.apk 2>/dev/null || ls target/*/apk/*.apk 2>/dev/null | head -n1)
+          test -n "$APK" || { echo "no built apk found"; exit 1; }
+          "$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS }}/apksigner" sign \
+            --ks "$RUNNER_TEMP/player.keystore" \
+            --ks-key-alias player \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "player-arm64.apk" \
+            "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: player-arm64
+          path: player-arm64.apk

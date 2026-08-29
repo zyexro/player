@@ -1,8 +1,40 @@
 [package]
 name = "player"
 version = "0.1.0"
-edition = "2026"
+edition = "2024"
+
+[lib]
+name = "player"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
 
 [dependencies]
-rodio = "0.19"
+eframe = { version = "0.36", default-features = false, features = ["android-native-activity", "default_fonts", "glow"] }
+rodio = "0.22"
 
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }
+log = "0.4"
+android_logger = "0.15"
+
+# --- cargo-apk2 android app metadata (ignored by plain cargo build) ---
+[package.metadata.android]
+package = "com.zyexro.player"
+apk_name = "player"
+build_targets = ["aarch64-linux-android"]
+use_aapt2 = true
+
+[package.metadata.android.sdk]
+min_sdk_version = 24
+target_sdk_version = 34
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_MEDIA_AUDIO"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+
+[package.metadata.android.application]
+label = "Player"
