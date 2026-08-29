@@ -5,17 +5,14 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
-env:
-  ANDROID_NDK_VERSION: "27.3.13750724"
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
-      ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+      ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
     steps:
       - uses: actions/checkout@v4
 
