@@ -17,11 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Java (for keytool/apksigner)
+      - name: Install Java (for keytool/apksigner/sdkmanager)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
