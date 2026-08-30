@@ -102,7 +102,7 @@ fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
 /// Resolve `PlayerActivity` via the app context's class loader. Plain `find_class`
 /// uses the system class loader on a Rust-attached thread and can't see app
 /// classes; the context's loader (PathClassLoader) can.
-fn activity_class(env: &mut jni::Env) -> jni::errors::Result<jni::objects::JClass> {
+fn activity_class<'a>(env: &'a mut jni::Env<'a>) -> jni::errors::Result<jni::objects::JClass<'a>> {
     let ctx = ndk_context::android_context();
     let context = unsafe { JObject::from_raw(env, ctx.context().cast()) };
     let loader = env
