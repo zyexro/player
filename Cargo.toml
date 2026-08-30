@@ -41,7 +41,7 @@ label = "Player"
 [[package.metadata.android.application.activity]]
 name = ".PlayerActivity"
 
-[package.metadata.android.application.activity.meta_data]
+[[package.metadata.android.application.activity.meta_data]]
 name = "android.app.lib_name"
 value = "player"
 
