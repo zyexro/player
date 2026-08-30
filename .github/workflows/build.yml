@@ -41,12 +41,13 @@ jobs:
 
       - name: Build APK
         run: |
-          # aaudio is required by cpal (rodio) but the NDK only emits it for
-          # min_sdk >= 26; seed the linker search path in case it's missing.
+          # cpal (rodio) links -laaudio on Android; make the arm64 runtime lib
+          # available on the linker search path cargo-apk2 already adds.
           mkdir -p target/cargo-apk-temp-extra-link-libraries
-          find "$ANDROID_NDK_HOME" -name libaaudio.so 2>/dev/null | while read -r f; do
-            cp "$f" target/cargo-apk-temp-extra-link-libraries/
-          done
+          cp "$ANDROID_NDK_HOME/platforms/android-26/arch-arm64/usr/lib/libaaudio.so" \
+             target/cargo-apk-temp-extra-link-libraries/ 2>/dev/null || \
+          find "$ANDROID_NDK_HOME/sysroot/usr/lib/aarch64-linux-android" -name libaaudio.so \
+             -exec cp {} target/cargo-apk-temp-extra-link-libraries/ \;
           cargo apk2 build --release
 
       - name: Sign APK
