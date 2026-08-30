@@ -57,8 +57,9 @@ pub fn pick_audio() {
 
 fn launch_picker() -> jni::errors::Result<()> {
     attach(|env| {
+        let class = player_class(env)?;
         env.call_static_method(
-            player_class(env)?,
+            class,
             jni_str!("launchAudioPicker"),
             jni_sig!(() -> void),
             &[],
