@@ -40,7 +40,14 @@ jobs:
             -dname "CN=Player, OU=Player, O=Player, L=Unknown, ST=Unknown, C=US"
 
       - name: Build APK
-        run: cargo apk2 build --release
+        run: |
+          # aaudio is required by cpal (rodio) but the NDK only emits it for
+          # min_sdk >= 26; seed the linker search path in case it's missing.
+          mkdir -p target/cargo-apk-temp-extra-link-libraries
+          find "$ANDROID_NDK_HOME" -name libaaudio.so 2>/dev/null | while read -r f; do
+            cp "$f" target/cargo-apk-temp-extra-link-libraries/
+          done
+          cargo apk2 build --release
 
       - name: Sign APK
         run: |
