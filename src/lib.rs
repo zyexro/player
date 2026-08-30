@@ -1,13 +1,17 @@
 use eframe::egui;
 use eframe::egui::{RichText, Ui};
 
-// A minimal music player: plays a self-contained synthesized track through rodio.
+#[cfg(target_os = "android")]
+mod android;
+
+// A music player for real audio files.
+//   - Android: orchestrates the SAF file picker (Java shim) and plays the bytes
+//     the user selects. See `src/java/.../PlayerActivity.java` + `android.rs`.
+//   - Desktop: falls back to a synthesized track so the app still demos.
 //
-// :ponytail: No real on-device file picking — we synthesize audio in-memory so the
-// app is trivially testable everywhere with zero Android-native plumbing.
-// CEILING: cannot play the user's own music library. UPGRADE: read files via the
-// Android Storage Access Framework (needs `jni` + a small Java intent) or MediaStore,
-// and feed the returned bytes to rodio::Decoder::new(BufReader).
+// :ponytail: Whole files go into memory; no playlist, no seeking, no metadata
+// (artist/album/artwork). CEILING: grow toward streaming + a proper song list.
+// UPGRADE: MediaStore scan for a library view; predictive device audio focus.
 
 pub struct TrackPlayer {
     // Keep the audio output device alive for the app's lifetime.
@@ -17,6 +21,128 @@ pub struct TrackPlayer {
     title: String,
 }
 
+impl TrackPlayer {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
+        Self {
+            sink: None,
+            player: None,
+            playing: false,
+            title: String::from("Pick a song to play it"),
+        }
+    }
+
+    /// Main button: pause / resume a loaded track, otherwise pick a song
+    /// (or play the synth fallback on desktop).
+    fn primary(&mut self) {
+        if self.playing {
+            if let Some(p) = &self.player {
+                p.pause();
+            }
+            self.playing = false;
+        } else if self.has_track() {
+            if let Some(p) = &self.player {
+                p.play();
+            }
+            self.playing = true;
+        } else {
+            #[cfg(target_os = "android")]
+            crate::android::pick_audio();
+            #[cfg(not(target_os = "android"))]
+            self.play_synth();
+        }
+    }
+
+    fn has_track(&self) -> bool {
+        self.player.as_ref().is_some_and(|p| !p.empty())
+    }
+
+    fn play_bytes(&mut self, bytes: Vec<u8>, name: String) {
+        if self.sink.is_none() {
+            match rodio::DeviceSinkBuilder::open_default_sink() {
+                Ok(sink) => self.sink = Some(sink),
+                Err(_) => {
+                    // No audio device: keep the UI responsive but don't crash.
+                    self.title = "No audio device".to_string();
+                    return;
+                }
+            }
+        }
+        if self.player.is_none() {
+            let mixer = self.sink.as_ref().unwrap().mixer();
+            self.player = Some(rodio::Player::connect_new(mixer));
+        }
+        let Some(p) = &self.player else { return };
+        p.stop();
+        match rodio::Decoder::new(std::io::Cursor::new(bytes)) {
+            Ok(src) => {
+                p.append(src);
+                p.play();
+                self.playing = true;
+                self.title = name;
+            }
+            Err(_) => self.title = format!("Unsupported audio format: {name}"),
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn play_synth(&mut self) {
+        self.play_bytes(synth_track(), String::from("C Major Arpeggio (generated)"));
+    }
+
+    #[cfg(target_os = "android")]
+    fn android_step(&mut self) {
+        while let Some(msg) = crate::android::poll() {
+            match msg {
+                crate::android::Msg::Picked { uri } => {
+                    let name = uri
+                        .rsplit('/')
+                        .next()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("song")
+                        .to_string();
+                    self.title = format!("Loading {name}…");
+                    crate::android::load_async(uri, name);
+                }
+                crate::android::Msg::Loaded { bytes, name } => {
+                    self.play_bytes(bytes, name);
+                }
+                crate::android::Msg::Error(e) => self.title = e,
+            }
+        }
+    }
+}
+
+impl eframe::App for TrackPlayer {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "android")]
+        self.android_step();
+
+        egui::Frame::central_panel(ui.style()).show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(80.0);
+                ui.label(RichText::new(&self.title).size(22.0).strong());
+                ui.add_space(30.0);
+
+                let label = if self.playing {
+                    "⏸ Pause"
+                } else if self.has_track() {
+                    "▶ Play"
+                } else {
+                    "🎵 Pick a Song"
+                };
+                if ui
+                    .add_sized([160.0, 56.0], egui::Button::new(RichText::new(label).size(20.0)))
+                    .clicked()
+                {
+                    self.primary();
+                }
+            });
+        });
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 fn synth_track() -> Vec<u8> {
     // Generate a short PCM track: 2 bars of a C major arpeggio at 44.1kHz mono.
     let sample_rate = 44_100u32;
@@ -51,72 +177,6 @@ fn synth_track() -> Vec<u8> {
     wav.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
     wav.extend_from_slice(&pcm);
     wav
-}
-
-impl TrackPlayer {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
-        Self {
-            sink: None,
-            player: None,
-            playing: false,
-            title: String::from("C Major Arpeggio (generated)"),
-        }
-    }
-
-    fn toggle(&mut self) {
-        if self.playing {
-            if let Some(p) = &self.player {
-                p.pause();
-            }
-            self.playing = false;
-        } else {
-            // Lazily open the audio device on first play so headless runs don't crash.
-            if self.sink.is_none() {
-                match rodio::DeviceSinkBuilder::open_default_sink() {
-                    Ok(sink) => self.sink = Some(sink),
-                    Err(_) => {
-                        // No audio device: keep the UI responsive but don't crash.
-                        self.playing = true;
-                        return;
-                    }
-                }
-            }
-            if self.player.is_none() {
-                let mixer = self.sink.as_ref().unwrap().mixer();
-                let player = rodio::Player::connect_new(mixer);
-                self.player = Some(player);
-            }
-            let player = self.player.as_ref().unwrap();
-            if player.is_paused() || player.empty() {
-                if let Ok(src) = rodio::Decoder::new(std::io::Cursor::new(synth_track())) {
-                    player.append(src);
-                }
-            }
-            player.play();
-            self.playing = true;
-        }
-    }
-}
-
-impl eframe::App for TrackPlayer {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        egui::Frame::central_panel(ui.style()).show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
-                ui.label(RichText::new(&self.title).size(22.0).strong());
-                ui.add_space(30.0);
-
-                let label = if self.playing { "⏸ Pause" } else { "▶ Play" };
-                if ui
-                    .add_sized([160.0, 56.0], egui::Button::new(RichText::new(label).size(20.0)))
-                    .clicked()
-                {
-                    self.toggle();
-                }
-            });
-        });
-    }
 }
 
 // --- Android entry point (loaded by NativeActivity via cargo-apk2) ---

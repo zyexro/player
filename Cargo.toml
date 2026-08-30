@@ -18,6 +18,8 @@ rodio = "0.22"
 winit = { version = "0.30", features = ["android-native-activity"] }
 log = "0.4"
 android_logger = "0.15"
+jni = "0.22"
+ndk-context = "0.1"
 
 # --- cargo-apk2 android app metadata (ignored by plain cargo build) ---
 [package.metadata.android]
@@ -25,16 +27,24 @@ package = "com.zyexro.player"
 apk_name = "player"
 build_targets = ["aarch64-linux-android"]
 use_aapt2 = true
+java_sources = "src/java"
 
 [package.metadata.android.sdk]
 min_sdk_version = 26
 target_sdk_version = 34
 
-[[package.metadata.android.uses_permission]]
-name = "android.permission.READ_MEDIA_AUDIO"
-
-[[package.metadata.android.uses_permission]]
-name = "android.permission.READ_EXTERNAL_STORAGE"
-
 [package.metadata.android.application]
 label = "Player"
+
+# Java `NativeActivity` subclass used solely to receive the SAF
+# (ACTION_OPEN_DOCUMENT) picker result and forward it to Rust.
+[[package.metadata.android.application.activity]]
+name = ".PlayerActivity"
+
+[package.metadata.android.application.activity.meta_data]
+name = "android.app.lib_name"
+value = "player"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
