@@ -41,13 +41,13 @@ jobs:
 
       - name: Build APK
         run: |
-          # cpal (rodio) links -laaudio on Android; make the arm64 runtime lib
-          # available on the linker search path cargo-apk2 already adds.
-          mkdir -p target/cargo-apk-temp-extra-link-libraries
-          cp "$ANDROID_NDK_HOME/platforms/android-26/arch-arm64/usr/lib/libaaudio.so" \
-             target/cargo-apk-temp-extra-link-libraries/ 2>/dev/null || \
-          find "$ANDROID_NDK_HOME/sysroot/usr/lib/aarch64-linux-android" -name libaaudio.so \
-             -exec cp {} target/cargo-apk-temp-extra-link-libraries/ \;
+          # cpal (rodio) links -laaudio on Android but the NDK only places the
+          # arm64 runtime lib under API-specific dirs; seed the linker search path
+          # that cargo-apk2 already adds. Must not abort if absent.
+          mkdir -p target/cargo-apk-temp-extra-link-libraries || true
+          find "$ANDROID_NDK_HOME" -name libaaudio.so 2>/dev/null \
+            | grep -E 'aarch64|arm64' \
+            | while read -r f; do cp -f "$f" target/cargo-apk-temp-extra-link-libraries/ || true; done
           cargo apk2 build --release
 
       - name: Sign APK
