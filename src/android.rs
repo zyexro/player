@@ -56,19 +56,16 @@ pub fn pick_audio() {
 }
 
 fn launch_picker() -> jni::errors::Result<()> {
-    let ctx = ndk_context::android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) };
-    let mut scope = jni::ScopeToken::default();
-    let mut guard = unsafe { vm.attach_current_thread_guard(Default::default, &mut scope)? };
-    let env = guard.borrow_env_mut();
-    let context = unsafe { JObject::from_raw(env, ctx.context().cast()) };
-    env.call_method(
-        &context,
-        jni_str!("launchAudioPicker"),
-        jni_sig!(() -> void),
-        &[],
-    )?;
-    Ok(())
+    attach(|env| {
+        let class = env.find_class(jni_str!("com/zyexro/player/PlayerActivity"))?;
+        env.call_static_method(
+            class,
+            jni_str!("launchAudioPicker"),
+            jni_sig!(() -> void),
+            &[],
+        )?;
+        Ok(())
+    })
 }
 
 /// Spawn a background read of the picked content URI; the result comes back via
@@ -83,26 +80,36 @@ pub fn load_async(uri: String, name: String) {
 /// Read a `content://` URI to bytes, delegating the actual IO to the Java shim
 /// to keep the JNI surface small.
 fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
+    attach(|env| {
+        let class = env.find_class(jni_str!("com/zyexro/player/PlayerActivity"))?;
+        let j_uri = env.new_string(uri)?;
+        let bytes_obj = env
+            .call_static_method(
+                class,
+                jni_str!("readUriBytes"),
+                jni_sig!((java.lang.String) -> [jbyte]),
+                &[(&j_uri).into()],
+            )?
+            .l()?;
+        if bytes_obj.is_null() {
+            return Err(Error::NullPtr("readUriBytes returned null"));
+        }
+        let jarr = unsafe { JByteArray::from_raw(env, bytes_obj.as_raw()) };
+        env.convert_byte_array(jarr)
+    })
+}
+
+/// Run `f` with an attached `Env<'local>`.
+fn attach<F, T>(f: F) -> jni::errors::Result<T>
+where
+    F: for<'local> FnOnce(&mut jni::Env<'local>) -> jni::errors::Result<T>,
+{
     let ctx = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) };
     let mut scope = jni::ScopeToken::default();
     let mut guard = unsafe { vm.attach_current_thread_guard(Default::default, &mut scope)? };
     let env = guard.borrow_env_mut();
-    let context = unsafe { JObject::from_raw(env, ctx.context().cast()) };
-    let j_uri = env.new_string(uri)?;
-    let bytes_obj = env
-        .call_method(
-            &context,
-            jni_str!("readUriBytes"),
-            jni_sig!((java.lang.String) -> [jbyte]),
-            &[(&j_uri).into()],
-        )?
-        .l()?;
-    if bytes_obj.is_null() {
-        return Err(Error::NullPtr("readUriBytes returned null"));
-    }
-    let jarr = unsafe { JByteArray::from_raw(env, bytes_obj.as_raw()) };
-    env.convert_byte_array(jarr)
+    f(env)
 }
 
 // --- Native callbacks invoked from PlayerActivity on the Java main thread ---
