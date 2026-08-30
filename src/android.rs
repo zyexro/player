@@ -10,7 +10,7 @@ use jni::{
     EnvUnowned,
     errors::{Error, ThrowRuntimeExAndDefault},
     jni_sig, jni_str,
-    objects::{JByteArray, JObject, JString, Reference},
+    objects::{Global, JByteArray, JClass, JObject, JString, Reference},
     sys,
 };
 use std::sync::{
@@ -57,9 +57,8 @@ pub fn pick_audio() {
 
 fn launch_picker() -> jni::errors::Result<()> {
     attach(|env| {
-        let class = activity_class(env)?;
         env.call_static_method(
-            class,
+            player_class(env)?,
             jni_str!("launchAudioPicker"),
             jni_sig!(() -> void),
             &[],
@@ -81,7 +80,7 @@ pub fn load_async(uri: String, name: String) {
 /// to keep the JNI surface small.
 fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
     attach(|env| {
-        let class = activity_class(env)?;
+        let class = player_class(env)?;
         let j_uri = env.new_string(uri)?;
         let bytes_obj = env
             .call_static_method(
@@ -99,10 +98,19 @@ fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
     })
 }
 
-/// Resolve `PlayerActivity` via the app context's class loader. Plain `find_class`
-/// uses the system class loader on a Rust-attached thread and can't see app
-/// classes; the context's loader (PathClassLoader) can.
-fn activity_class<'a>(env: &'a mut jni::Env<'a>) -> jni::errors::Result<jni::objects::JClass<'a>> {
+/// Cached global ref to `com.zyexro.player.PlayerActivity`. A `Global` carries
+/// no borrow of any `Env`, so callers can't run into borrow-checker conflicts.
+static PLAYER_CLASS: OnceLock<Global<JClass<'static>>> = OnceLock::new();
+
+/// Resolved (or cached) player class. Plain `find_class` uses the system class
+/// loader on a Rust-attached thread and can't see app classes, so we resolve
+/// through the app context's class loader (`PathClassLoader`) once and cache.
+fn player_class(
+    env: &mut jni::Env,
+) -> jni::errors::Result<&'static Global<JClass<'static>>> {
+    if let Some(cls) = PLAYER_CLASS.get() {
+        return Ok(cls);
+    }
     let ctx = ndk_context::android_context();
     let context = unsafe { JObject::from_raw(env, ctx.context().cast()) };
     let loader = env
@@ -122,7 +130,10 @@ fn activity_class<'a>(env: &'a mut jni::Env<'a>) -> jni::errors::Result<jni::obj
             &[(&class_name).into()],
         )?
         .l()?;
-    Ok(unsafe { jni::objects::JClass::from_raw(env, class.as_raw()) })
+    let class = unsafe { jni::objects::JClass::from_raw(env, class.as_raw()) };
+    let global = env.new_global_ref(class)?;
+    let _ = PLAYER_CLASS.set(global);
+    Ok(PLAYER_CLASS.get().expect("class just cached"))
 }
 
 /// Run `f` with an attached `Env<'local>`.
