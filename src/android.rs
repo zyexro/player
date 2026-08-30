@@ -57,7 +57,7 @@ pub fn pick_audio() {
 
 fn launch_picker() -> jni::errors::Result<()> {
     attach(|env| {
-        let class = env.find_class(jni_str!("com/zyexro/player/PlayerActivity"))?;
+        let class = activity_class(env)?;
         env.call_static_method(
             class,
             jni_str!("launchAudioPicker"),
@@ -81,7 +81,7 @@ pub fn load_async(uri: String, name: String) {
 /// to keep the JNI surface small.
 fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
     attach(|env| {
-        let class = env.find_class(jni_str!("com/zyexro/player/PlayerActivity"))?;
+        let class = activity_class(env)?;
         let j_uri = env.new_string(uri)?;
         let bytes_obj = env
             .call_static_method(
@@ -97,6 +97,32 @@ fn read_all_bytes(uri: &str) -> jni::errors::Result<Vec<u8>> {
         let jarr = unsafe { JByteArray::from_raw(env, bytes_obj.as_raw()) };
         env.convert_byte_array(jarr)
     })
+}
+
+/// Resolve `PlayerActivity` via the app context's class loader. Plain `find_class`
+/// uses the system class loader on a Rust-attached thread and can't see app
+/// classes; the context's loader (PathClassLoader) can.
+fn activity_class(env: &mut jni::Env) -> jni::errors::Result<jni::objects::JClass> {
+    let ctx = ndk_context::android_context();
+    let context = unsafe { JObject::from_raw(env, ctx.context().cast()) };
+    let loader = env
+        .call_method(
+            &context,
+            jni_str!("getClassLoader"),
+            jni_sig!(() -> java.lang.ClassLoader),
+            &[],
+        )?
+        .l()?;
+    let class_name = env.new_string("com.zyexro.player.PlayerActivity")?;
+    let class = env
+        .call_method(
+            loader,
+            jni_str!("loadClass"),
+            jni_sig!((java.lang.String) -> java.lang.Class),
+            &[(&class_name).into()],
+        )?
+        .l()?;
+    Ok(unsafe { jni::objects::JClass::from_raw(env, class.as_raw()) })
 }
 
 /// Run `f` with an attached `Env<'local>`.
